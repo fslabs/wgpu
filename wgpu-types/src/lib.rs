@@ -28,6 +28,10 @@ use core::{
 
 use bytemuck::{Pod, Zeroable};
 
+#[doc(hidden)]
+/// This is here to make not having the patch induce a compile error and be noticed quicker.
+pub const PLEASE_PATCH_YOUR_WGPU_TYPES_VERSION: () = ();
+
 #[cfg(any(feature = "serde", test))]
 use {
     alloc::format,
