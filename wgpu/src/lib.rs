@@ -63,6 +63,10 @@ pub extern crate wgpu_core as wgc;
 pub extern crate wgpu_hal as hal;
 pub extern crate wgpu_types as wgt;
 
+#[doc(hidden)]
+/// This is here to make not having the patch induce a compile error and be noticed quicker.
+pub const PLEASE_PATCH_YOUR_WGPU_VERSION: () = ();
+
 //
 //
 // Modules
