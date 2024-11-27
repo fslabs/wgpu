@@ -105,6 +105,10 @@ extern crate std;
 
 extern crate alloc;
 
+#[doc(hidden)]
+/// This is here to make not having the patch induce a compile error and be noticed quicker.
+pub const PLEASE_PATCH_YOUR_NAGA_VERSION: () = ();
+
 mod arena;
 pub mod back;
 pub mod common;
