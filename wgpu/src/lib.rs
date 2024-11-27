@@ -25,6 +25,10 @@
 #![allow(clippy::arc_with_non_send_sync)]
 #![cfg_attr(not(any(wgpu_core, webgpu)), allow(unused))]
 
+#[doc(hidden)]
+/// This is here to make not having the patch induce a compile error and be noticed quicker.
+pub const PLEASE_PATCH_YOUR_WGPU_VERSION: () = ();
+
 //
 //
 // Modules
