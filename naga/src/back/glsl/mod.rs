@@ -660,9 +660,7 @@ impl<'a, W: Write> Writer<'a, W> {
 
         for (_, expr) in func.expressions.iter() {
             if let Expression::ImageSample {
-                image,
-                depth_ref,
-                ..
+                image, depth_ref, ..
             } = *expr
             {
                 if let Some(global_handle) = resolve_to_global(expressions, image) {
@@ -3079,7 +3077,8 @@ impl<'a, W: Write> Writer<'a, W> {
                 // End the function
                 write!(self.out, ")")?;
                 // For depth value sampling, texture(sampler2D, uv) returns vec4, take .r
-                if matches!(class, crate::ImageClass::Depth { multi: false }) && depth_ref.is_none() {
+                if matches!(class, crate::ImageClass::Depth { multi: false }) && depth_ref.is_none()
+                {
                     write!(self.out, ".r")?;
                 }
             }
