@@ -48,11 +48,12 @@ pub use features::Features;
 use crate::{
     back::{self, Baked},
     proc::{self, ExpressionKindTracker, NameKey},
-    valid, Handle, ShaderStage, TypeInner,
+    valid, Expression, Handle, ImageClass, ShaderStage, TypeInner,
 };
 use features::FeaturesManager;
 use std::{
     cmp::Ordering,
+    collections::HashSet,
     fmt::{self, Error as FmtError, Write},
     mem,
 };
@@ -638,6 +639,53 @@ impl<'a, W: Write> Writer<'a, W> {
         Ok(this)
     }
 
+    /// Depth images that are only sampled for value. For these we emit
+    /// sampler2D in GLSL so that texture(sampler2D, uv).r is valid; otherwise we emit sampler2DShadow.
+    fn depth_value_only_images(&self) -> HashSet<Handle<crate::GlobalVariable>> {
+        let func = &self.entry_point.function;
+        let expressions = &func.expressions;
+        let mut value_used = HashSet::new();
+        let mut comparison_used = HashSet::new();
+
+        fn resolve_to_global(
+            expressions: &crate::Arena<Expression>,
+            handle: Handle<Expression>,
+        ) -> Option<Handle<crate::GlobalVariable>> {
+            match expressions[handle] {
+                Expression::GlobalVariable(h) => Some(h),
+                Expression::Load { pointer } => resolve_to_global(expressions, pointer),
+                _ => None,
+            }
+        }
+
+        for (_, expr) in func.expressions.iter() {
+            if let Expression::ImageSample {
+                image,
+                depth_ref,
+                ..
+            } = *expr
+            {
+                if let Some(global_handle) = resolve_to_global(expressions, image) {
+                    let global = &self.module.global_variables[global_handle];
+                    if let TypeInner::Image {
+                        class: ImageClass::Depth { multi: false },
+                        ..
+                    } = self.module.types[global.ty].inner
+                    {
+                        if depth_ref.is_none() {
+                            value_used.insert(global_handle);
+                        } else {
+                            comparison_used.insert(global_handle);
+                        }
+                    }
+                }
+            }
+        }
+
+        value_used.retain(|h| !comparison_used.contains(h));
+        value_used
+    }
+
     /// Writes the [`Module`](crate::Module) as glsl to the output
     ///
     /// # Notes
@@ -823,6 +871,10 @@ impl<'a, W: Write> Writer<'a, W> {
 
         let ep_info = self.info.get_entry_point(self.entry_point_idx as usize);
 
+        // Depth images used only for value sampling need sampler2D in GLSL ES
+        // so that texture(sampler2D, uv).r is valid, otherwise we emit sampler2DShadow.
+        let depth_value_only_images = self.depth_value_only_images();
+
         // Write the globals
         //
         // Unless explicitly disabled with WriterFlags::INCLUDE_UNUSED_ITEMS,
@@ -897,7 +949,8 @@ impl<'a, W: Write> Writer<'a, W> {
                     //
                     // This is way we need the leading space because `write_image_type` doesn't add
                     // any spaces at the beginning or end
-                    self.write_image_type(dim, arrayed, class)?;
+                    let use_depth_shadow = !depth_value_only_images.contains(&handle);
+                    self.write_image_type(dim, arrayed, class, use_depth_shadow)?;
 
                     // Finally write the name and end the global with a `;`
                     // The leading space is important
@@ -1080,12 +1133,16 @@ impl<'a, W: Write> Writer<'a, W> {
     /// Helper method to write a image type
     ///
     /// # Notes
-    /// Adds no leading or trailing whitespace
+    /// Adds no leading or trailing whitespace.
+    /// For depth images, `use_depth_shadow` controls whether to emit `sampler2DShadow`
+    /// or `sampler2D`. Use `false` only for depth images that are only value-sampled in GLSL ES,
+    /// so that `texture(sampler2D, uv).r` is valid.
     fn write_image_type(
         &mut self,
         dim: crate::ImageDimension,
         arrayed: bool,
         class: crate::ImageClass,
+        use_depth_shadow: bool,
     ) -> BackendResult {
         // glsl images consist of four parts the scalar prefix, the image "type", the dimensions
         // and modifiers
@@ -1098,7 +1155,7 @@ impl<'a, W: Write> Writer<'a, W> {
         // this order to be valid
         // - MS - used if it's a multisampled image
         // - Array - used if it's an image array
-        // - Shadow - used if it's a depth image
+        // - Shadow - used if it's a depth image, omit for value-only sampling in GLSL ES.
         use crate::ImageClass as Ic;
         use crate::Scalar as S;
         let float = S {
@@ -1109,7 +1166,12 @@ impl<'a, W: Write> Writer<'a, W> {
             Ic::Sampled { kind, multi: true } => ("sampler", S { kind, width: 4 }, "MS", ""),
             Ic::Sampled { kind, multi: false } => ("sampler", S { kind, width: 4 }, "", ""),
             Ic::Depth { multi: true } => ("sampler", float, "MS", ""),
-            Ic::Depth { multi: false } => ("sampler", float, "", "Shadow"),
+            Ic::Depth { multi: false } => (
+                "sampler",
+                float,
+                "",
+                if use_depth_shadow { "Shadow" } else { "" },
+            ),
             Ic::Storage { format, .. } => ("image", format.into(), "", ""),
         };
 
@@ -1673,7 +1735,7 @@ impl<'a, W: Write> Writer<'a, W> {
                     //
                     // This is way we need the leading space because `write_image_type` doesn't add
                     // any spaces at the beginning or end
-                    this.write_image_type(dim, arrayed, class)?;
+                    this.write_image_type(dim, arrayed, class, true)?;
                 }
                 TypeInner::Pointer { base, .. } => {
                     // write parameter qualifiers
@@ -3015,7 +3077,11 @@ impl<'a, W: Write> Writer<'a, W> {
                 }
 
                 // End the function
-                write!(self.out, ")")?
+                write!(self.out, ")")?;
+                // For depth value sampling, texture(sampler2D, uv) returns vec4, take .r
+                if matches!(class, crate::ImageClass::Depth { multi: false }) && depth_ref.is_none() {
+                    write!(self.out, ".r")?;
+                }
             }
             Expression::ImageLoad {
                 image,
