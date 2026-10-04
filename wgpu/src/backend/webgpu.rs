@@ -2512,20 +2512,13 @@ impl dispatch::QueueInterface for WebQueue {
         data: &[u8],
     ) {
         let buffer = buffer.as_webgpu();
-        /* Skip the copy once gecko allows BufferSource instead of ArrayBuffer
-        self.inner.write_buffer_with_f64_and_u8_array_and_f64_and_f64(
-            &buffer.buffer,
-            offset as f64,
-            data,
-            0f64,
-            data.len() as f64,
-        );
-        */
+        // writeBuffer snapshots the source synchronously. The slice binding passes a
+        // view of WASM memory, so no intermediate JavaScript allocation is needed.
         self.inner
-            .write_buffer_with_f64_and_buffer_source_and_f64_and_f64(
+            .write_buffer_with_f64_and_u8_slice_and_f64_and_f64(
                 &buffer.inner,
                 offset as f64,
-                &js_sys::Uint8Array::from(data).buffer(),
+                data,
                 0f64,
                 data.len() as f64,
             )
