@@ -264,6 +264,30 @@ impl Device {
         ComputePipeline { inner: pipeline }
     }
 
+    /// Creates a [`RenderPipeline`] that resolves once it is ready to draw with.
+    ///
+    /// A browser's WebGPU compiles it off the thread that serves the page's other GPU calls, so
+    /// the page keeps drawing while it compiles, and the future resolves to the error a failed
+    /// creation reports. Every other backend creates it before this returns, as
+    /// [`Self::create_render_pipeline`] does, and the future is ready at once.
+    pub fn create_render_pipeline_async(
+        &self,
+        desc: &RenderPipelineDescriptor<'_>,
+    ) -> impl Future<Output = Result<RenderPipeline, Error>> + WasmNotSend {
+        let pipeline = self.inner.create_render_pipeline_async(desc);
+        async move { pipeline.await.map(|inner| RenderPipeline { inner }) }
+    }
+
+    /// Creates a [`ComputePipeline`] that resolves once it is ready to dispatch with, the way
+    /// [`Self::create_render_pipeline_async`] creates a render pipeline.
+    pub fn create_compute_pipeline_async(
+        &self,
+        desc: &ComputePipelineDescriptor<'_>,
+    ) -> impl Future<Output = Result<ComputePipeline, Error>> + WasmNotSend {
+        let pipeline = self.inner.create_compute_pipeline_async(desc);
+        async move { pipeline.await.map(|inner| ComputePipeline { inner }) }
+    }
+
     /// Creates a [`Buffer`].
     #[must_use]
     pub fn create_buffer(&self, desc: &BufferDescriptor<'_>) -> Buffer {
