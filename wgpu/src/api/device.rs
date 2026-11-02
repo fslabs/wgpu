@@ -250,6 +250,29 @@ impl Device {
         RenderPipeline { inner: pipeline }
     }
 
+    /// Creates a browser render pipeline without blocking the GPU process command thread.
+    ///
+    /// Returns the browser's pipeline compilation error if creation fails.
+    #[cfg(webgpu)]
+    pub fn create_render_pipeline_async(
+        &self,
+        desc: &RenderPipelineDescriptor<'_>,
+    ) -> impl Future<Output = Result<RenderPipeline, String>> + WasmNotSend {
+        let pipeline = self
+            .inner
+            .as_webgpu_opt()
+            .map(|device| device.create_render_pipeline_async(desc));
+        let fallback = pipeline
+            .is_none()
+            .then(|| self.create_render_pipeline(desc));
+        async move {
+            match pipeline {
+                Some(pipeline) => pipeline.await.map(|inner| RenderPipeline { inner }),
+                None => Ok(fallback.expect("non-WebGPU pipeline was created synchronously")),
+            }
+        }
+    }
+
     /// Creates a mesh shader based [`RenderPipeline`].
     #[must_use]
     pub fn create_mesh_pipeline(&self, desc: &MeshPipelineDescriptor<'_>) -> RenderPipeline {
